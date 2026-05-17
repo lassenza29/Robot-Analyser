@@ -7,7 +7,7 @@ import math
 # Configuration de la page (Mode Pro Ultime)
 st.set_page_config(page_title="Analyseur Financier Pro & Comparateur", page_icon="🏛️", layout="wide")
 
-st.title("🏛️ Analyseur Financier Professionnel :) ")
+st.title("🏛️ Assenza Analyseur Financier Professionnel ")
 st.markdown("Outil d'analyse fondamentale, de visualisation graphique et de comparaison d'actifs (Actions & ETF).")
 
 # --- FONCTIONS DE SÉCURITÉ & DE CALCULS AVANCÉS ---
