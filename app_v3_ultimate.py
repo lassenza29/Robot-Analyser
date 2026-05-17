@@ -4,13 +4,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 
-# Configuration de la page (Mode Pro Ultime)
-st.set_page_config(page_title="Analyseur Financier Pro & Comparateur", page_icon="🏛️", layout="wide")
+# Configuration de la page
+st.set_page_config(page_title="Analyseur & Comparateur Pro", page_icon="🏛️", layout="wide")
 
 st.title("🏛️ Analyseur Financier ")
-st.markdown("Outil d'analyse fondamentale, de visualisation graphique et de comparaison d'actifs (Actions & ETF).")
+st.markdown("Outil d'analyse fondamentale, de visualisation graphique et de comparaison.")
 
-# --- FONCTIONS DE SÉCURITÉ & DE CALCULS AVANCÉS ---
+# --- FONCTIONS DE SÉCURITÉ ---
 def get_float(info_dict, key, mult=1.0, default=0.0):
     val = info_dict.get(key)
     if val is None: return default
@@ -29,13 +29,12 @@ def extraire_donnees_action(ticker_symbole):
             return None
         
         nom = info.get('longName') or info.get('shortName') or ticker_symbole
-        prix = get_float(info, 'currentPrice') or get_float(info, 'regularMarketPrice')
+        prix = get_float(info, 'currentPrice') or get_float(info, 'regularMarketPrice') or get_float(info, 'previousClose')
         cap = get_float(info, 'marketCap', 1 / 1_000_000)
         
-        # --- CORRECTIF DETTE & TRÉSORERIE ---
+        # Correctif Dette
         dette_b = get_float(info, 'totalDebt', 1 / 1_000_000)
         treso = get_float(info, 'totalCash', 1 / 1_000_000)
-        
         if dette_b == 0:
             dette_b = (get_float(info, 'longTermDebt') + get_float(info, 'shortLongTermDebt')) / 1_000_000
             
@@ -52,7 +51,7 @@ def extraire_donnees_action(ticker_symbole):
         actions = get_float(info, 'sharesOutstanding')
         actif_net_a = get_float(info, 'bookValue')
         
-        # --- CORRECTIF CAPITAUX PROPRES & ACTIF NET ---
+        # Correctif Capitaux Propres
         cp = get_float(info, 'totalStockholderEquity', 1 / 1_000_000)
         if cp == 0 and actif_net_a > 0 and actions > 0:
             cp = (actif_net_a * actions) / 1_000_000
@@ -63,7 +62,7 @@ def extraire_donnees_action(ticker_symbole):
         bna = get_float(info, 'trailingEps') or get_float(info, 'forwardEps')
         per = get_float(info, 'trailingPE')
         
-        # --- CORRECTIF VALEUR JUSTE DE GRAHAM ---
+        # Correctif Graham
         produit_graham = 22.5 * bna * actif_net_a
         p_graham = math.sqrt(produit_graham) if produit_graham > 0 else 0.0
         
@@ -87,7 +86,8 @@ def extraire_donnees_etf(ticker_symbole):
             
         nom = info.get('longName') or info.get('shortName') or ticker_symbole
         frais = get_float(info, 'expenseRatio', 100.0)
-        encours = get_float(info, 'totalAssets', 1 / 1_000_000)
+        # Fallback pour les ETF (Yahoo Finance met parfois l'encours dans marketCap)
+        encours = get_float(info, 'totalAssets', 1 / 1_000_000) or get_float(info, 'marketCap', 1 / 1_000_000)
         rendement = get_float(info, 'trailingAnnualDividendYield', 100.0) or get_float(info, 'yield', 100.0)
         
         return {
@@ -96,12 +96,12 @@ def extraire_donnees_etf(ticker_symbole):
     except Exception:
         return None
 
-# --- NAVIGATION DE L'APPLICATION ---
+# --- NAVIGATION ---
 onglets = st.sidebar.radio("Navigation 🛠️", ["Analyse Unique", "Comparateur Pro"])
 
 if onglets == "Analyse Unique":
     st.header("🔍 Analyse Individuelle de Titre")
-    ticker_symbole = st.text_input("Entrez le symbole (ex: AAPL, RMS.PA, CW8.PA, SPY) :", value="AAPL").upper().strip()
+    ticker_symbole = st.text_input("Entrez le symbole (ex: AAPL, RMS.PA, CW8.PA) :", value="AAPL").upper().strip()
     
     if ticker_symbole:
         with st.spinner("Récupération des données..."):
@@ -110,7 +110,7 @@ if onglets == "Analyse Unique":
                 info = ticker.info
                 
                 if not info or ('shortName' not in info and 'longName' not in info):
-                    st.error("❌ Symbole introuvable. Vérifiez l'extension (ex: .PA pour Paris).")
+                    st.error("❌ Symbole introuvable. Vérifiez l'extension.")
                 else:
                     quote_type = get_str(info, 'quoteType').upper()
                     
@@ -122,22 +122,30 @@ if onglets == "Analyse Unique":
                         if data:
                             st.header(f"📊 ETF : {data['nom']} ({ticker_symbole})")
                             
+                            # Affichage avec gestion des zéros de Yahoo Finance (N/A)
                             col1, col2, col3 = st.columns(3)
-                            col1.metric("Frais de gestion (TER)", f"{data['frais']:.2f} %")
-                            col2.metric("Encours du Fonds", f"{data['encours']:,.1f} M$")
-                            col3.metric("Rendement (Dividende)", f"{data['rendement']:.2f} %")
+                            col1.metric("Frais de gestion (TER)", f"{data['frais']:.2f} %" if data['frais'] > 0 else "N/A (Donnée absente)")
+                            col2.metric("Encours du Fonds", f"{data['encours']:,.1f} M$" if data['encours'] > 0 else "N/A (Donnée absente)")
+                            col3.metric("Rendement (Dividende)", f"{data['rendement']:.2f} %" if data['rendement'] > 0 else "N/A ou Capitalisant")
                             
-                            st.markdown("### Évaluation des critères :")
-                            if 0 < data['frais'] <= 0.30:
-                                st.success("🟢 Frais bas (<0.30%). Idéal pour le long terme.")
+                            if data['frais'] == 0 or data['encours'] == 0:
+                                st.warning("⚠️ Note : Yahoo Finance ne fournit pas toutes les données fondamentales pour certains ETF européens. Les valeurs affichées en 'N/A' nécessitent d'être vérifiées sur le site de l'émetteur (Amundi, iShares, etc.).")
+                            
+                            st.divider()
+                            st.subheader("🕯️ Évolution du cours sur 10 ans")
+                            hist = data['ticker_obj'].history(period="10y")
+                            if not hist.empty:
+                                fig_candle = go.Figure(data=[go.Candlestick(x=hist.index,
+                                                open=hist['Open'], high=hist['High'],
+                                                low=hist['Low'], close=hist['Close'],
+                                                name="Prix")])
+                                fig_candle.update_layout(title=f"Historique des prix en Bougies - {ticker_symbole}", 
+                                                         xaxis_title="Date", yaxis_title="Prix", 
+                                                         xaxis_rangeslider_visible=False, template="plotly_dark")
+                                st.plotly_chart(fig_candle, use_container_width=True)
                             else:
-                                st.warning("⚠️ Frais modérés ou élevés (>0.30%).")
+                                st.info("Historique des prix non disponible.")
                                 
-                            if data['encours'] >= 100:
-                                st.success(f"🟢 Taille critique atteinte ({data['encours']:,.1f} M$). Liquidité optimale, risque de fermeture nul.")
-                            else:
-                                st.error("🔴 Fonds de petite taille. Risque de liquidité ou de fermeture.")
-                    
                     # ==========================================
                     # MODE ACTION UNIQUE
                     # ==========================================
@@ -181,7 +189,7 @@ if onglets == "Analyse Unique":
                             
                             st.markdown("#### ⚖️ Juste Valeur & Verdict")
                             c20, c21 = st.columns(2)
-                            c20.metric("21. Prix Juste Graham", f"{data['p_graham']:.2f} $" if data['p_graham'] > 0 else "Non applicable (BNA ou Actif Net Négatif)")
+                            c20.metric("21. Prix Juste Graham", f"{data['p_graham']:.2f} $" if data['p_graham'] > 0 else "N/A (BNA ou Actif Net Négatif)")
                             
                             is_safe = (data['dette_n'] <= 0) or (data['ratio_d_e'] < 3)
                             is_profitable = (data['marge_expl'] > 8) and (data['roe'] > 10)
@@ -198,13 +206,29 @@ if onglets == "Analyse Unique":
                                     st.error("❌ Recalée (Dette excessive ou Rentabilité trop faible).")
                                     
                             # ==========================================
-                            # AJOUT GRAPHISMES & ÉVOLUTION HISTORIQUE (CORRIGÉ barmode)
+                            # GRAPHIQUES HISTORIQUES
                             # ==========================================
                             st.divider()
-                            st.header("📈 Évolution Graphique des Métriques")
+                            st.header("📈 Évolution Graphique")
                             
-                            choix_metrique = st.selectbox("Sélectionnez la métrique à analyser historiquement :", 
-                                                          ["Chiffre d'affaires & Résultat Net", "Capitaux Propres & Dette Totale"])
+                            # GRAPHIQUE EN BOUGIES (CANDLESTICK) 10 ANS
+                            st.subheader("🕯️ Évolution du cours sur 10 ans")
+                            hist = data['ticker_obj'].history(period="10y")
+                            if not hist.empty:
+                                fig_candle = go.Figure(data=[go.Candlestick(x=hist.index,
+                                                open=hist['Open'], high=hist['High'],
+                                                low=hist['Low'], close=hist['Close'],
+                                                name="Prix")])
+                                fig_candle.update_layout(title=f"Historique des prix en Bougies - {ticker_symbole}", 
+                                                         xaxis_title="Date", yaxis_title="Prix ($/€)", 
+                                                         xaxis_rangeslider_visible=False, template="plotly_dark")
+                                st.plotly_chart(fig_candle, use_container_width=True)
+                            else:
+                                st.info("Historique des prix non disponible.")
+
+                            # GRAPHIQUES DE MÉTRIQUES
+                            st.subheader("📊 Évolution des Métriques Comptables")
+                            choix_metrique = st.selectbox("Sélectionnez la métrique :", ["Chiffre d'affaires & Résultat Net", "Capitaux Propres & Dette Totale"])
                             
                             try:
                                 if choix_metrique == "Chiffre d'affaires & Résultat Net":
@@ -214,7 +238,7 @@ if onglets == "Analyse Unique":
                                         fig = go.Figure()
                                         fig.add_trace(go.Bar(x=annees, y=financials.loc["Total Revenue"], name="Chiffre d'affaires (M$)"))
                                         fig.add_trace(go.Bar(x=annees, y=financials.loc["Net Income"], name="Résultat Net (M$)"))
-                                        fig.update_layout(barmode='group', title="Évolution des Performances Annuelles", xaxis_title="Année", yaxis_title="Millions $")
+                                        fig.update_layout(barmode='group', title="Performances Annuelles", xaxis_title="Année", yaxis_title="Millions $", template="plotly_dark")
                                         st.plotly_chart(fig, use_container_width=True)
                                     else:
                                         st.info("Données financières historiques partielles ou indisponibles pour ce Ticker.")
@@ -231,27 +255,27 @@ if onglets == "Analyse Unique":
                                             fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_cp], mode='lines+markers', name="Capitaux Propres (M$)"))
                                             if key_dette:
                                                 fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_dette], mode='lines+markers', name="Dette Totale (M$)"))
-                                            fig.update_layout(title="Évolution de la Solvabilité Structurelle (Bilan)", xaxis_title="Année", yaxis_title="Millions $")
+                                            fig.update_layout(title="Solvabilité Structurelle (Bilan)", xaxis_title="Année", yaxis_title="Millions $", template="plotly_dark")
                                             st.plotly_chart(fig, use_container_width=True)
                                         else:
                                             st.info("Données de bilan historiques indisponibles pour ce Ticker.")
                             except Exception as e:
-                                st.caption(f"Note graphique : Données financières historiques introuvables via l'API ({e}).")
+                                st.caption(f"Données non visualisables : {e}")
             except Exception as e:
                 st.error(f"Erreur lors du chargement : {e}")
 
 # =========================================================
-# MODE COMPARATEUR PRO (MULTI-ACTIFS HÉTÉROGÈNES - CORRIGÉ barmode)
+# MODE COMPARATEUR PRO 
 # =========================================================
 else:
     st.header("🏛️ Comparateur Multitâche Professionnel")
     type_comparaison = st.radio("Sélectionnez le type d'actifs à comparer :", ["🏢 Actions", "📊 ETF"])
     
     if type_comparaison == "🏢 Actions":
-        tickers_input = st.text_input("Entrez les symboles des actions séparés par des virgules (ex: AAPL, MSFT, RMS.PA, OR.PA) :", value="AAPL, MSFT")
+        tickers_input = st.text_input("Entrez les symboles des actions séparés par des virgules (ex: AAPL, MSFT, RMS.PA, NVDA) :", value="AAPL, MSFT, NVDA")
         liste_tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
         
-        if st.button("Lancer la Comparaison des Ratios"):
+        if st.button("Lancer la Comparaison des Actions"):
             resultats = []
             for t in liste_tickers:
                 d = extraire_donnees_action(t)
@@ -270,13 +294,13 @@ else:
                 fig_comp = go.Figure()
                 fig_comp.add_trace(go.Bar(x=df["Ticker"], y=df["Marge Expl. (%)"], name="Marge Exploitation (%)"))
                 fig_comp.add_trace(go.Bar(x=df["Ticker"], y=df["Marge Nette (%)"], name="Marge Nette (%)"))
-                fig_comp.update_layout(barmode='group', title="Comparaison des Marges de Rentabilité", yaxis_title="%")
+                fig_comp.update_layout(barmode='group', title="Comparaison des Marges de Rentabilité", yaxis_title="%", template="plotly_dark")
                 st.plotly_chart(fig_comp, use_container_width=True)
             else:
-                st.error("Aucune donnée valide récupérée pour ces tickers d'actions.")
+                st.error("Aucune donnée valide récupérée pour ces actions.")
                 
     else:
-        tickers_input = st.text_input("Entrez les symboles des ETF séparés par des virgules (ex: SPY, EUSA, CW8.PA) :", value="SPY, CW8.PA")
+        tickers_input = st.text_input("Entrez les symboles des ETF séparés par des virgules (ex: SPY, CW8.PA, ESE.PA) :", value="SPY, CW8.PA")
         liste_tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
         
         if st.button("Lancer la Comparaison des ETF"):
@@ -284,16 +308,24 @@ else:
             for t in liste_tickers:
                 d = extraire_donnees_etf(t)
                 if d:
+                    # Gérer l'affichage propre des zéros (données manquantes de Yahoo Finance)
                     resultats.append({
-                        "Ticker": t, "Nom": d['nom'], "Frais (TER %)": round(d['frais'], 2), 
-                        "Encours (M$)": round(d['encours'], 1), "Rendement (%)": round(d['rendement'], 2)
+                        "Ticker": t, "Nom": d['nom'], 
+                        "Frais (TER %)": round(d['frais'], 2) if d['frais'] > 0 else "N/A", 
+                        "Encours (M$)": round(d['encours'], 1) if d['encours'] > 0 else "N/A", 
+                        "Rendement (%)": round(d['rendement'], 2) if d['rendement'] > 0 else "N/A"
                     })
+            
             if resultats:
                 df = pd.DataFrame(resultats)
                 st.dataframe(df.set_index("Ticker"), use_container_width=True)
+                st.warning("⚠️ Les valeurs 'N/A' signifient que Yahoo Finance ne possède pas ces données pour cet ETF.")
                 
-                fig_etf = go.Figure(go.Bar(x=df["Ticker"], y=df["Frais (TER %)"], marker_color='indianred'))
-                fig_etf.update_layout(title="Comparaison des Frais de Gestion des ETF (Le plus bas est le mieux)", yaxis_title="TER %")
-                st.plotly_chart(fig_etf, use_container_width=True)
+                # Créer le graphique uniquement pour les ETF qui ont des frais communiqués (pas N/A)
+                df_plot = df[df["Frais (TER %)"] != "N/A"]
+                if not df_plot.empty:
+                    fig_etf = go.Figure(go.Bar(x=df_plot["Ticker"], y=df_plot["Frais (TER %)"], marker_color='indianred'))
+                    fig_etf.update_layout(title="Comparaison des Frais de Gestion (Les plus bas sont les meilleurs)", yaxis_title="TER %", template="plotly_dark")
+                    st.plotly_chart(fig_etf, use_container_width=True)
             else:
-                st.error("Aucune donnée valide récupérée pour ces tickers d'ETF.")
+                st.error("Aucune donnée valide récupérée pour ces ETF.")
