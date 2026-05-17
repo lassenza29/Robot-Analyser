@@ -33,12 +33,9 @@ def extraire_donnees_action(ticker_symbole):
         cap = get_float(info, 'marketCap', 1 / 1_000_000)
         
         # --- CORRECTIF DETTE & TRÉSORERIE ---
-        # Pour les financières/banques ou certaines fiches Europe, 'totalDebt' peut être faux ou absent.
-        # On tente de croiser plusieurs clés financières de yfinance.
         dette_b = get_float(info, 'totalDebt', 1 / 1_000_000)
         treso = get_float(info, 'totalCash', 1 / 1_000_000)
         
-        # Secours bilanciel si totalDebt est manquant mais qu'on a des dettes à long/court terme explicites
         if dette_b == 0:
             dette_b = (get_float(info, 'longTermDebt') + get_float(info, 'shortLongTermDebt')) / 1_000_000
             
@@ -67,8 +64,6 @@ def extraire_donnees_action(ticker_symbole):
         per = get_float(info, 'trailingPE')
         
         # --- CORRECTIF VALEUR JUSTE DE GRAHAM ---
-        # Formule classique : sqrt(22.5 * BNA * ActifNetParAction)
-        # Si le BNA ou l'Actif Net est négatif, la formule de Graham standard ne s'applique pas (valeur intrinsèque non calculable par cette méthode).
         produit_graham = 22.5 * bna * actif_net_a
         p_graham = math.sqrt(produit_graham) if produit_graham > 0 else 0.0
         
@@ -110,145 +105,143 @@ if onglets == "Analyse Unique":
     
     if ticker_symbole:
         with st.spinner("Récupération des données..."):
-            ticker = yf.Ticker(ticker_symbole)
-            info = ticker.info
-            
-            if not info or ('shortName' not in info and 'longName' not in info):
-                st.error("❌ Symbole introuvable. Vérifiez l'extension (ex: .PA pour Paris).")
-            else:
-                quote_type = get_str(info, 'quoteType').upper()
+            try:
+                ticker = yf.Ticker(ticker_symbole)
+                info = ticker.info
                 
-                # ==========================================
-                # MODE ETF UNIQUE
-                # ==========================================
-                if quote_type == "ETF":
-                    data = extraire_donnees_etf(ticker_symbole)
-                    if data:
-                        st.header(f"📊 ETF : {data['nom']} ({ticker_symbole})")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Frais de gestion (TER)", f"{data['frais']:.2f} %")
-                        col2.metric("Encours du Fonds", f"{data['encours']:,.1f} M$")
-                        col3.metric("Rendement (Dividende)", f"{data['rendement']:.2f} %")
-                        
-                        st.markdown("### Évaluation des critères :")
-                        if 0 < data['frais'] <= 0.30:
-                            st.success("🟢 Frais bas (<0.30%). Idéal pour le long terme.")
-                        else:
-                            st.warning("⚠️ Frais modérés ou élevés (>0.30%).")
-                            
-                        if data['encours'] >= 100:
-                            st.success(f"🟢 Taille critique atteinte ({data['encours']:,.1f} M$). Liquidité optimale, risque de fermeture nul.")
-                        else:
-                            st.error("🔴 Fonds de petite taille. Risque de liquidité ou de fermeture.")
-                
-                # ==========================================
-                # MODE ACTION UNIQUE
-                # ==========================================
+                if not info or ('shortName' not in info and 'longName' not in info):
+                    st.error("❌ Symbole introuvable. Vérifiez l'extension (ex: .PA pour Paris).")
                 else:
-                    data = extraire_donnees_action(ticker_symbole)
-                    if data:
-                        st.header(f"🏢 Action : {data['nom']} ({ticker_symbole})")
-                        
-                        # --- BLOCS DES 21 RATIOS ---
-                        st.markdown("#### 📊 Ratios Fondamentaux")
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("2. Nom de l'entreprise", data['nom'])
-                        c2.metric("3. Prix actuel", f"{data['prix']:,.2f} $")
-                        c3.metric("4. Capitalisation", f"{data['cap']:,.0f} M$")
-                        c4.metric("17. Actions en circulation", f"{data['actions']:,.0f}" if data['actions'] else "N/A")
-                        
-                        st.markdown("#### 🛡️ Solvabilité & Bilan")
-                        c5, c6, c7, c8 = st.columns(4)
-                        c5.metric("5. Dette Brute", f"{data['dette_b']:,.0f} M$")
-                        c6.metric("6. Trésorerie", f"{data['treso']:,.0f} M$")
-                        c7.metric("7. Dette Nette", f"{data['dette_n']:,.0f} M$")
-                        c8.metric("15. Capitaux Propres", f"{data['cp']:,.0f} M$")
-                        
-                        c9, c10 = st.columns(2)
-                        c9.metric("8. EBITDA", f"{data['ebitda']:,.0f} M$")
-                        c10.metric("9. Ratio Dette Nette / EBITDA", f"{data['ratio_d_e']:.2f} x" if data['ratio_d_e'] != float('inf') else "EBITDA Négatif")
-                        
-                        st.markdown("#### 📈 Compte de Résultat & Performance")
-                        c11, c12, c13, c14, c15 = st.columns(5)
-                        c11.metric("10. Chiffre d'affaires", f"{data['ca']:,.0f} M$")
-                        c12.metric("11. Résultat d'Exploit.", f"{data['res_expl']:,.0f} M$")
-                        c13.metric("12. Résultat Net", f"{data['res_net']:,.0f} M$")
-                        c14.metric("13. Marge d'Exploit.", f"{data['marge_expl']:.2f} %")
-                        c15.metric("14. Marge Nette", f"{data['marge_net']:.2f} %")
-                        
-                        st.markdown("#### 🪙 Valorisation & Multiples")
-                        c16, c17, c18, c19 = st.columns(4)
-                        c16.metric("16. ROE", f"{data['roe']:.2f} %")
-                        c17.metric("18. BNA", f"{data['bna']:.2f} $")
-                        c18.metric("19. PER", f"{data['per']:.2f} x" if data['per'] else "N/A")
-                        c19.metric("20. Actif Net par Action", f"{data['actif_net_a']:.2f} $")
-                        
-                        st.markdown("#### ⚖️ Juste Valeur & Verdict")
-                        c20, c21 = st.columns(2)
-                        c20.metric("21. Prix Juste Graham", f"{data['p_graham']:.2f} $" if data['p_graham'] > 0 else "Non applicable (BNA ou Actif Net Négatif)")
-                        
-                        # Verdict Élaboré (Critère 1)
-                        is_safe = (data['dette_n'] <= 0) or (data['ratio_d_e'] < 3)
-                        is_profitable = (data['marge_expl'] > 8) and (data['roe'] > 10)
-                        is_cheap = (data['p_graham'] > 0 and data['prix'] < data['p_graham'])
-                        
-                        with c21:
-                            st.markdown("**1. Critère & Verdict Global :**")
-                            if is_safe and is_profitable:
-                                if is_cheap:
-                                    st.success("✅ Entreprise Excellente & Sous-évaluée.")
-                                else:
-                                    st.warning("⚠️ Entreprise Saine mais prix de marché supérieur à la valeur de Graham.")
+                    quote_type = get_str(info, 'quoteType').upper()
+                    
+                    # ==========================================
+                    # MODE ETF UNIQUE
+                    # ==========================================
+                    if quote_type == "ETF":
+                        data = extraire_donnees_etf(ticker_symbole)
+                        if data:
+                            st.header(f"📊 ETF : {data['nom']} ({ticker_symbole})")
+                            
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Frais de gestion (TER)", f"{data['frais']:.2f} %")
+                            col2.metric("Encours du Fonds", f"{data['encours']:,.1f} M$")
+                            col3.metric("Rendement (Dividende)", f"{data['rendement']:.2f} %")
+                            
+                            st.markdown("### Évaluation des critères :")
+                            if 0 < data['frais'] <= 0.30:
+                                st.success("🟢 Frais bas (<0.30%). Idéal pour le long terme.")
                             else:
-                                st.error("❌ Recalée (Dette excessive ou Rentabilité trop faible).")
+                                st.warning("⚠️ Frais modérés ou élevés (>0.30%).")
                                 
-                        # ==========================================
-                        # AJOUT GRAPHISMES & ÉVOLUTION HISTORIQUE
-                        # ==========================================
-                        st.divider()
-                        st.header("📈 Évolution Graphique des Métriques")
-                        
-                        # Choix de la métrique historique
-                        choix_metrique = st.selectbox("Sélectionnez la métrique à analyser historiquement :", 
-                                                      ["Chiffre d'affaires & Résultat Net", "Capitaux Propres & Dette Totale"])
-                        
-                        try:
-                            # Extraction du bilan/compte de résultat annuel via yfinance
-                            if choix_metrique == "Chiffre d'affaires & Résultat Net":
-                                financials = data['ticker_obj'].financials / 1_000_000
-                                if not financials.empty and "Total Revenue" in financials.index and "Net Income" in financials.index:
-                                    annees = financials.columns.strftime('%Y')
-                                    fig = go.Figure()
-                                    fig.add_trace(go.Bar(x=annees, y=financials.loc["Total Revenue"], name="Chiffre d'affaires (M$)"))
-                                    fig.add_trace(go.Bar(x=annees, y=financials.loc["Net Income"], name="Résultat Net (M$)"))
-                                    fig.update_layout(bgroupmode='group', title="Évolution des Performances Annuelles", xaxis_title="Année", yaxis_title="Millions $")
-                                    st.plotly_chart(fig, use_container_width=True)
+                            if data['encours'] >= 100:
+                                st.success(f"🟢 Taille critique atteinte ({data['encours']:,.1f} M$). Liquidité optimale, risque de fermeture nul.")
+                            else:
+                                st.error("🔴 Fonds de petite taille. Risque de liquidité ou de fermeture.")
+                    
+                    # ==========================================
+                    # MODE ACTION UNIQUE
+                    # ==========================================
+                    else:
+                        data = extraire_donnees_action(ticker_symbole)
+                        if data:
+                            st.header(f"🏢 Action : {data['nom']} ({ticker_symbole})")
+                            
+                            st.markdown("#### 📊 Ratios Fondamentaux")
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("2. Nom de l'entreprise", data['nom'])
+                            c2.metric("3. Prix actuel", f"{data['prix']:,.2f} $")
+                            c3.metric("4. Capitalisation", f"{data['cap']:,.0f} M$")
+                            c4.metric("17. Actions en circulation", f"{data['actions']:,.0f}" if data['actions'] else "N/A")
+                            
+                            st.markdown("#### 🛡️ Solvabilité & Bilan")
+                            c5, c6, c7, c8 = st.columns(4)
+                            c5.metric("5. Dette Brute", f"{data['dette_b']:,.0f} M$")
+                            c6.metric("6. Trésorerie", f"{data['treso']:,.0f} M$")
+                            c7.metric("7. Dette Nette", f"{data['dette_n']:,.0f} M$")
+                            c8.metric("15. Capitaux Propres", f"{data['cp']:,.0f} M$")
+                            
+                            c9, c10 = st.columns(2)
+                            c9.metric("8. EBITDA", f"{data['ebitda']:,.0f} M$")
+                            c10.metric("9. Ratio Dette Nette / EBITDA", f"{data['ratio_d_e']:.2f} x" if data['ratio_d_e'] != float('inf') else "EBITDA Négatif")
+                            
+                            st.markdown("#### 📈 Compte de Résultat & Performance")
+                            c11, c12, c13, c14, c15 = st.columns(5)
+                            c11.metric("10. Chiffre d'affaires", f"{data['ca']:,.0f} M$")
+                            c12.metric("11. Résultat d'Exploit.", f"{data['res_expl']:,.0f} M$")
+                            c13.metric("12. Résultat Net", f"{data['res_net']:,.0f} M$")
+                            c14.metric("13. Marge d'Exploit.", f"{data['marge_expl']:.2f} %")
+                            c15.metric("14. Marge Nette", f"{data['marge_net']:.2f} %")
+                            
+                            st.markdown("#### 🪙 Valorisation & Multiples")
+                            c16, c17, c18, c19 = st.columns(4)
+                            c16.metric("16. ROE", f"{data['roe']:.2f} %")
+                            c17.metric("18. BNA", f"{data['bna']:.2f} $")
+                            c18.metric("19. PER", f"{data['per']:.2f} x" if data['per'] else "N/A")
+                            c19.metric("20. Actif Net par Action", f"{data['actif_net_a']:.2f} $")
+                            
+                            st.markdown("#### ⚖️ Juste Valeur & Verdict")
+                            c20, c21 = st.columns(2)
+                            c20.metric("21. Prix Juste Graham", f"{data['p_graham']:.2f} $" if data['p_graham'] > 0 else "Non applicable (BNA ou Actif Net Négatif)")
+                            
+                            is_safe = (data['dette_n'] <= 0) or (data['ratio_d_e'] < 3)
+                            is_profitable = (data['marge_expl'] > 8) and (data['roe'] > 10)
+                            is_cheap = (data['p_graham'] > 0 and data['prix'] < data['p_graham'])
+                            
+                            with c21:
+                                st.markdown("**1. Critère & Verdict Global :**")
+                                if is_safe and is_profitable:
+                                    if is_cheap:
+                                        st.success("✅ Entreprise Excellente & Sous-évaluée.")
+                                    else:
+                                        st.warning("⚠️ Entreprise Saine mais prix de marché supérieur à la valeur de Graham.")
                                 else:
-                                    st.info("Données financières historiques partielles ou indisponibles pour ce Ticker.")
+                                    st.error("❌ Recalée (Dette excessive ou Rentabilité trop faible).")
                                     
-                            elif choix_metrique == "Capitaux Propres & Dette Totale":
-                                balance = data['ticker_obj'].balance_sheet / 1_000_000
-                                if not balance.empty:
-                                    # Essayer d'attraper les variations de clés de bilan
-                                    key_cp = "Stockholders Equity" if "Stockholders Equity" in balance.index else ("Total Equity Gross Minority Interest" if "Total Equity Gross Minority Interest" in balance.index else None)
-                                    key_dette = "Total Debt" if "Total Debt" in balance.index else None
-                                    
-                                    if key_cp:
-                                        annees = balance.columns.strftime('%Y')
+                            # ==========================================
+                            # AJOUT GRAPHISMES & ÉVOLUTION HISTORIQUE (CORRIGÉ barmode)
+                            # ==========================================
+                            st.divider()
+                            st.header("📈 Évolution Graphique des Métriques")
+                            
+                            choix_metrique = st.selectbox("Sélectionnez la métrique à analyser historiquement :", 
+                                                          ["Chiffre d'affaires & Résultat Net", "Capitaux Propres & Dette Totale"])
+                            
+                            try:
+                                if choix_metrique == "Chiffre d'affaires & Résultat Net":
+                                    financials = data['ticker_obj'].financials / 1_000_000
+                                    if not financials.empty and "Total Revenue" in financials.index and "Net Income" in financials.index:
+                                        annees = financials.columns.strftime('%Y')
                                         fig = go.Figure()
-                                        fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_cp], mode='lines+markers', name="Capitaux Propres (M$)"))
-                                        if key_dette:
-                                            fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_dette], mode='lines+markers', name="Dette Totale (M$)"))
-                                        fig.update_layout(title="Évolution de la Solvabilité Structurelle (Bilan)", xaxis_title="Année", yaxis_title="Millions $")
+                                        fig.add_trace(go.Bar(x=annees, y=financials.loc["Total Revenue"], name="Chiffre d'affaires (M$)"))
+                                        fig.add_trace(go.Bar(x=annees, y=financials.loc["Net Income"], name="Résultat Net (M$)"))
+                                        fig.update_layout(barmode='group', title="Évolution des Performances Annuelles", xaxis_title="Année", yaxis_title="Millions $")
                                         st.plotly_chart(fig, use_container_width=True)
                                     else:
-                                        st.info("Données de bilan historiques indisponibles pour ce Ticker.")
-                        except Exception as e:
-                            st.caption(f"Note graphique : Données financières historiques introuvables via l'API ({e}).")
+                                        st.info("Données financières historiques partielles ou indisponibles pour ce Ticker.")
+                                        
+                                elif choix_metrique == "Capitaux Propres & Dette Totale":
+                                    balance = data['ticker_obj'].balance_sheet / 1_000_000
+                                    if not balance.empty:
+                                        key_cp = "Stockholders Equity" if "Stockholders Equity" in balance.index else ("Total Equity Gross Minority Interest" if "Total Equity Gross Minority Interest" in balance.index else None)
+                                        key_dette = "Total Debt" if "Total Debt" in balance.index else None
+                                        
+                                        if key_cp:
+                                            annees = balance.columns.strftime('%Y')
+                                            fig = go.Figure()
+                                            fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_cp], mode='lines+markers', name="Capitaux Propres (M$)"))
+                                            if key_dette:
+                                                fig.add_trace(go.Scatter(x=annees, y=balance.loc[key_dette], mode='lines+markers', name="Dette Totale (M$)"))
+                                            fig.update_layout(title="Évolution de la Solvabilité Structurelle (Bilan)", xaxis_title="Année", yaxis_title="Millions $")
+                                            st.plotly_chart(fig, use_container_width=True)
+                                        else:
+                                            st.info("Données de bilan historiques indisponibles pour ce Ticker.")
+                            except Exception as e:
+                                st.caption(f"Note graphique : Données financières historiques introuvables via l'API ({e}).")
+            except Exception as e:
+                st.error(f"Erreur lors du chargement : {e}")
 
 # =========================================================
-# MODE COMPARATEUR PRO (MULTI-ACTIFS HÉTÉROGÈNES)
+# MODE COMPARATEUR PRO (MULTI-ACTIFS HÉTÉROGÈNES - CORRIGÉ barmode)
 # =========================================================
 else:
     st.header("🏛️ Comparateur Multitâche Professionnel")
@@ -274,11 +267,10 @@ else:
                 df = pd.DataFrame(resultats)
                 st.dataframe(df.set_index("Ticker"), use_container_width=True)
                 
-                # Petit graphique comparatif des Marges de rentabilité
                 fig_comp = go.Figure()
                 fig_comp.add_trace(go.Bar(x=df["Ticker"], y=df["Marge Expl. (%)"], name="Marge Exploitation (%)"))
                 fig_comp.add_trace(go.Bar(x=df["Ticker"], y=df["Marge Nette (%)"], name="Marge Nette (%)"))
-                fig_comp.update_layout(bgroupmode='group', title="Comparaison des Marges de Rentabilité", yaxis_title="%")
+                fig_comp.update_layout(barmode='group', title="Comparaison des Marges de Rentabilité", yaxis_title="%")
                 st.plotly_chart(fig_comp, use_container_width=True)
             else:
                 st.error("Aucune donnée valide récupérée pour ces tickers d'actions.")
@@ -300,7 +292,6 @@ else:
                 df = pd.DataFrame(resultats)
                 st.dataframe(df.set_index("Ticker"), use_container_width=True)
                 
-                # Graphique comparatif des frais de gestion
                 fig_etf = go.Figure(go.Bar(x=df["Ticker"], y=df["Frais (TER %)"], marker_color='indianred'))
                 fig_etf.update_layout(title="Comparaison des Frais de Gestion des ETF (Le plus bas est le mieux)", yaxis_title="TER %")
                 st.plotly_chart(fig_etf, use_container_width=True)
